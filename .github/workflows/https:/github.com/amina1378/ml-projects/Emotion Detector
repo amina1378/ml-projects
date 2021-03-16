@@ -1,0 +1,68 @@
+import os
+import numpy as np
+import pandas as pd
+from tensorflow import keras
+from keras import Model
+from tqdm import tqdm
+import cv2
+os.environ['KAGGLE_USERNAME'] = "*******"
+os.environ['KAGGLE_KEY'] = "*******"
+
+!kaggle datasets download -d ananthu017/emotion-detection-fer
+
+from zipfile import ZipFile
+
+with ZipFile('/content/emotion-detection-fer.zip', 'r') as zipObj:
+  zipObj.extractall()
+
+train_dir = '/content/train'
+test_dir = '/content/test'
+target_size = (48, 48)
+batch_size = 32
+datagen1 = keras.preprocessing.image.ImageDataGenerator(rescale=1.0/255.0,
+    rotation_range=30,
+    width_shift_range=0.2,
+    height_shift_range=0.2,)
+datagen2 = keras.preprocessing.image.ImageDataGenerator(rescale=1.0/255.0)
+train_gen = datagen1.flow_from_directory(train_dir, target_size=target_size, batch_size=batch_size, class_mode='categorical')
+test_gen = datagen2.flow_from_directory(test_dir, target_size=target_size, batch_size=batch_size, class_mode='categorical')
+
+from keras.models import Model
+input = keras.layers.Input(shape=(48,48,3))
+x = keras.layers.Conv2D(filters=32, kernel_size=3, activation='relu')(input)
+x = keras.layers.BatchNormalization()(x)
+x = keras.layers.MaxPooling2D(2,2)(x)
+x = keras.layers.Conv2D(filters=32, kernel_size=3, activation='relu')(x)
+x = keras.layers.BatchNormalization()(x)
+x = keras.layers.MaxPooling2D(2,2)(x)
+x = keras.layers.Flatten()(x)
+x = keras.layers.Dense(256, activation='relu')(x)
+x = keras.layers.Dropout(0.3)(x)
+x = keras.layers.Dense(7, activation='softmax')(x)
+model = Model(inputs=input, outputs=x)
+
+from sklearn.utils.class_weight import compute_class_weight
+classes = np.unique(train_gen.classes)
+y = train_gen.labels
+class_weights = compute_class_weight('balanced', classes=classes, y=y)
+class_dict = {}
+for i in classes:
+  class_dict[i] = class_weights[i]
+
+model.compile(loss='categorical_crossentropy', optimizer=keras.optimizers.Adam(lr=0.0001), metrics=['accuracy'])
+
+class myCallback(keras.callbacks.Callback):
+  best=9999
+  def on_epoch_end(self, epoch, logs={}):
+    if self.best < logs.get('val_loss'):
+      self.best = logs.get('val_loss')
+      model.save('/content/drive/MyDrive/model.h5')
+callbacks = myCallback()
+
+h = model.fit(train_gen, steps_per_epoch=int(28709/32), validation_data=test_gen, validation_steps=int(7178/32), epochs=100, class_weight=class_dict, callbacks=[callbacks])
+
+import matplotlib.pyplot as plt
+
+plt.plot(h.history['loss'], c='b')
+plt.plot(h.history['val_loss'], c='r')
+plt.show()
